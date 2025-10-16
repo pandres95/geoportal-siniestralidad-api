@@ -9,6 +9,7 @@ SEARCH AND REPLACE:
 """
 import sys
 import os
+import glob
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 try:
     from core.strategy import BaseLoaderStrategy
@@ -160,3 +161,25 @@ class SchoolsStrategy(BaseLoaderStrategy):
         # - Check for duplicates
 
         return warnings
+
+    def get_migration_files(self) -> Dict[str, List[str]]:
+        """Return migration files for this model (up and down)"""
+        model_path = f"models/{self.model_name}"
+        migrate_path = f"{model_path}/migrate"
+
+        up_migrations = []
+        down_migrations = []
+
+        if os.path.exists(migrate_path):
+            # Get all .sql files in migrate directory
+            for file_path in sorted(glob.glob(os.path.join(migrate_path, "*.sql"))):
+                filename = os.path.basename(file_path)
+                if 'rollback' in filename.lower() or 'down' in filename.lower():
+                    down_migrations.append(file_path)
+                elif filename != '001_create_migrations_table.sql':  # Skip the migrations table itself
+                    up_migrations.append(file_path)
+
+        return {
+            'up': up_migrations,
+            'down': down_migrations
+        }

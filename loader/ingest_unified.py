@@ -143,49 +143,42 @@ class UnifiedDataLoader:
             return False
 
     def _run_migrations(self, migrate_up: bool, migrate_down: bool) -> bool:
-        """Run database migrations for all models"""
+        """Run database migrations for all models with proper sequencing"""
         success = True
+
+        # First, ensure migrations table exists
+        if not self._ensure_migrations_table():
+            print("❌ Failed to create migrations table")
+            return False
 
         for model_name, strategy in self.strategies.items():
             try:
                 print(f"\n🔄 Processing migrations for model: {model_name}")
 
-                # Get migration files
-                up_migrations, down_migrations = self.discovery.get_model_migrations(model_name)
+                # Get migration files using new strategy method
+                migration_files = strategy.get_migration_files()
+                up_migrations = migration_files['up']
+                down_migrations = migration_files['down']
 
-                # Run down migrations first (if requested)
+                # Run down migrations first (if requested) - in reverse order
                 if migrate_down and down_migrations:
                     print(f"   ⬇️  Running down migrations...")
-                    for migration_file in down_migrations:
-                        if not self._execute_sql_file(migration_file):
+                    for migration_file in reversed(down_migrations):
+                        if not self._execute_migration_file(migration_file, model_name, 'down'):
                             success = False
+                            break  # Stop on first failure
                 elif migrate_down:
-                    # If no migration files found but down migrations requested, try strategy paths
-                    print(f"   ⬇️  Running down migrations from strategy...")
-                    try:
-                        drop_sql_path = strategy.get_drop_table_sql_path()
-                        if drop_sql_path and os.path.exists(drop_sql_path):
-                            if not self._execute_sql_file(drop_sql_path):
-                                success = False
-                    except Exception as e:
-                        print(f"   ⚠️  No migration path from strategy: {e}")
+                    print(f"   ⚠️  No down migrations found for {model_name}")
 
-                # Run up migrations (if requested)
+                # Run up migrations (if requested) - in order
                 if migrate_up and up_migrations:
                     print(f"   ⬆️  Running up migrations...")
                     for migration_file in up_migrations:
-                        if not self._execute_sql_file(migration_file):
+                        if not self._execute_migration_file(migration_file, model_name, 'up'):
                             success = False
+                            break  # Stop on first failure
                 elif migrate_up:
-                    # If no migration files found but migrations requested, try strategy paths
-                    print(f"   ⬆️  Running up migrations from strategy...")
-                    try:
-                        create_sql_path = strategy.get_create_table_sql_path()
-                        if create_sql_path and os.path.exists(create_sql_path):
-                            if not self._execute_sql_file(create_sql_path):
-                                success = False
-                    except Exception as e:
-                        print(f"   ⚠️  No migration path from strategy: {e}")
+                    print(f"   ⚠️  No up migrations found for {model_name}")
 
                 if migrate_up or migrate_down:
                     print(f"   ✅ Migrations completed for {model_name}")
@@ -195,6 +188,77 @@ class UnifiedDataLoader:
                 success = False
 
         return success
+
+    def _ensure_migrations_table(self) -> bool:
+        """Ensure the migrations tracking table exists"""
+        try:
+            migrations_sql_path = "core/001_create_migrations_table.sql"
+            if os.path.exists(migrations_sql_path):
+                print("🔧 Ensuring migrations table exists...")
+                return self._execute_sql_file(migrations_sql_path)
+            else:
+                print("⚠️  Migrations table SQL file not found")
+                return False
+        except Exception as e:
+            print(f"❌ Error ensuring migrations table: {e}")
+            return False
+
+    def _execute_migration_file(self, sql_file_path: str, model_name: str, direction: str) -> bool:
+        """Execute a migration file with tracking"""
+        try:
+            if not os.path.exists(sql_file_path):
+                print(f"   ⚠️  Migration file not found: {sql_file_path}")
+                return False
+
+            migration_name = os.path.basename(sql_file_path)
+            print(f"   📄 Executing migration: {migration_name}")
+
+            # Check if migration has already been applied (for up migrations)
+            if direction == 'up':
+                if self._is_migration_applied(model_name, migration_name):
+                    print(f"   ⏭️  Migration {migration_name} already applied, skipping...")
+                    return True
+
+            # Execute the migration
+            if not self._execute_sql_file(sql_file_path):
+                return False
+
+            # Record the migration as applied (for up migrations)
+            if direction == 'up':
+                self._record_migration_applied(model_name, migration_name)
+
+            return True
+
+        except Exception as e:
+            print(f"   ❌ Migration execution error: {e}")
+            return False
+
+    def _is_migration_applied(self, model_name: str, migration_name: str) -> bool:
+        """Check if a migration has already been applied"""
+        try:
+            with psycopg2.connect(self.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT 1 FROM public.migrations WHERE model = %s AND migration = %s",
+                        (model_name, migration_name)
+                    )
+                    return cur.fetchone() is not None
+        except Exception as e:
+            print(f"   ⚠️  Error checking migration status: {e}")
+            return False
+
+    def _record_migration_applied(self, model_name: str, migration_name: str) -> None:
+        """Record that a migration has been applied"""
+        try:
+            with psycopg2.connect(self.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO public.migrations (model, migration) VALUES (%s, %s)",
+                        (model_name, migration_name)
+                    )
+                    conn.commit()
+        except Exception as e:
+            print(f"   ⚠️  Error recording migration: {e}")
 
     def _execute_sql_file(self, sql_file_path: str) -> bool:
         """Execute a SQL file against the database"""

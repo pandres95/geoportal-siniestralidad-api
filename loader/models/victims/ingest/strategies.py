@@ -7,6 +7,7 @@ import pandas as pd
 from datetime import datetime
 import json
 import os
+import glob
 from typing import List, Dict, Any, Optional
 
 # Import the base strategy interface
@@ -189,4 +190,26 @@ class VictimsLoaderStrategy(BaseLoaderStrategy):
                     warnings.append(f"Found {too_old} ages over 150")
 
         return warnings
+
+    def get_migration_files(self) -> Dict[str, List[str]]:
+        """Return migration files for this model (up and down)"""
+        model_path = f"models/{self.model_name}"
+        migrate_path = f"{model_path}/migrate"
+
+        up_migrations = []
+        down_migrations = []
+
+        if os.path.exists(migrate_path):
+            # Get all .sql files in migrate directory
+            for file_path in sorted(glob.glob(os.path.join(migrate_path, "*.sql"))):
+                filename = os.path.basename(file_path)
+                if 'rollback' in filename.lower() or 'down' in filename.lower():
+                    down_migrations.append(file_path)
+                elif filename != '001_create_migrations_table.sql':  # Skip the migrations table itself
+                    up_migrations.append(file_path)
+
+        return {
+            'up': up_migrations,
+            'down': down_migrations
+        }
 
