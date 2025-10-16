@@ -1,0 +1,109 @@
+"""
+Template strategy for new model implementation.
+Copy and modify this file for your specific model requirements.
+
+SEARCH AND REPLACE:
+- Replace {MODEL_NAME} with your model name (e.g., Schools)
+- Replace {TABLE_NAME} with your database table name (e.g., schools)
+- Replace {SOURCE_CRS} with your source coordinate system (e.g., EPSG:4326)
+"""
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+try:
+    from core.strategy import BaseLoaderStrategy
+except ImportError:
+    # Fallback for direct execution
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    from core.strategy import BaseLoaderStrategy
+import geopandas as gpd
+import pandas as pd
+from datetime import datetime
+from typing import Dict, List
+
+
+class {MODEL_NAME}Strategy(BaseLoaderStrategy):
+    """Strategy for loading {MODEL_NAME} data from .gpkg files"""
+
+    def __init__(self):
+        super().__init__("{model_name}", "{table_name}")
+        self.source_crs = "{SOURCE_CRS}"  # Update as needed
+
+    def load_data(self, file_path: str) -> gpd.GeoDataFrame:
+        """Load data from file and return GeoDataFrame"""
+        print(f"📖 Loading {self.table_name} data from: {file_path}")
+
+        # Update based on your file format (.gpkg, .shp, etc.)
+        gdf = gpd.read_file(file_path)
+
+        print(f"✅ Loaded {len(gdf)} records")
+        print(f"📋 Columns: {list(gdf.columns)}")
+        print(f"📐 CRS: {gdf.crs}")
+
+        return gdf
+
+    def transform_data(self, gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        """Transform data according to {MODEL_NAME} model requirements"""
+        print(f"🔄 Transforming {self.table_name} data...")
+
+        # Create a copy to avoid modifying original
+        transformed_gdf = gdf.copy()
+
+        # Add your specific transformations here
+        # Examples:
+        # - Date conversions
+        # - Column renaming
+        # - Data validation
+        # - Coordinate transformations
+
+        # Transform coordinate system if needed
+        if gdf.crs and gdf.crs.to_string() != self.target_crs:
+            print(f"🌐 Transforming CRS to {self.target_crs}")
+            transformed_gdf = transformed_gdf.to_crs(self.target_crs)
+
+        # Rename columns to match database schema
+        column_mapping = self.get_column_mapping()
+        for source_col, target_col in column_mapping.items():
+            if source_col in transformed_gdf.columns:
+                print(f"📝 Renaming {source_col} → {target_col}")
+                transformed_gdf.rename(columns={source_col: target_col}, inplace=True)
+
+        print(f"✅ Transformation completed")
+        return transformed_gdf
+
+    def get_column_mapping(self) -> Dict[str, str]:
+        """Map source columns to target database columns"""
+        return {
+            # Add your column mappings here
+            # 'source_column': 'target_column',
+            'geom': 'geom',  # Geometry column (required)
+        }
+
+    def get_create_table_sql_path(self) -> str:
+        """Return path to SQL CREATE TABLE file for {MODEL_NAME} model"""
+        return "models/{model_name}/migrate/001_create_{table_name}_table.sql"
+
+    def get_drop_table_sql_path(self) -> str:
+        """Return path to SQL DROP TABLE file for {MODEL_NAME} model"""
+        return "models/{model_name}/migrate/001_create_{table_name}_table_rollback.sql"
+
+    def get_insert_sql(self) -> str:
+        """Return SQL insert statement for this model"""
+        return """
+        INSERT INTO public.{table_name}
+        -- Add your columns here (must match CREATE TABLE statement)
+        (geom)
+        VALUES %s
+        """
+
+    def validate_data(self, gdf: gpd.GeoDataFrame) -> List[str]:
+        """Validate {MODEL_NAME}-specific data"""
+        warnings = super().validate_data(gdf)
+
+        # Add your specific validations here
+        # Examples:
+        # - Check for required columns
+        # - Validate data ranges
+        # - Check for duplicates
+
+        return warnings
