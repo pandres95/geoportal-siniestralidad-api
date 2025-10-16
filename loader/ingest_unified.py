@@ -409,6 +409,8 @@ class UnifiedDataLoader:
             return 'victims'
         elif 'schools' in file_name:
             return 'schools'
+        elif 'zat' in file_name:
+            return 'zat'
 
         return None
 
