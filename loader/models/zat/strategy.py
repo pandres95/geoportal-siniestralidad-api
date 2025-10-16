@@ -110,14 +110,6 @@ class ZATStrategy(BaseLoaderStrategy):
             'down': down_migrations
         }
 
-    def get_create_table_sql_path(self) -> str:
-        """Return path to SQL CREATE TABLE file for {MODEL_NAME} model"""
-        return "models/{model_name}/migrate/001_create_{table_name}_table.sql"
-
-    def get_drop_table_sql_path(self) -> str:
-        """Return path to SQL DROP TABLE file for {MODEL_NAME} model"""
-        return "models/{model_name}/migrate/001_create_{table_name}_table_rollback.sql"
-
     def get_insert_sql(self) -> str:
         """Return SQL insert statement for ZAT table"""
         return """

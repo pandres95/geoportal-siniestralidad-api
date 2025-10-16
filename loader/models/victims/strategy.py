@@ -88,14 +88,6 @@ class VictimsLoaderStrategy(BaseLoaderStrategy):
         print(f"✅ Transformation completed. Final columns: {list(transformed_gdf.columns)}")
         return transformed_gdf
 
-    def get_create_table_sql_path(self) -> str:
-        """Return path to SQL CREATE TABLE file for victims model"""
-        return "models/victims/migrate/001_create_victims_table.sql"
-
-    def get_drop_table_sql_path(self) -> str:
-        """Return path to SQL DROP TABLE file for victims model"""
-        return "models/victims/migrate/001_create_victims_table_rollback.sql"
-
     def _convert_to_date(self, series: pd.Series) -> pd.Series:
         """Convert text dates to datetime objects"""
         converted = pd.Series(index=series.index, dtype='object')

@@ -36,16 +36,6 @@ class BaseLoaderStrategy(ABC):
         """Return SQL insert statement for this model"""
         pass
 
-    @abstractmethod
-    def get_create_table_sql_path(self) -> str:
-        """Return path to SQL CREATE TABLE file for this model"""
-        pass
-
-    @abstractmethod
-    def get_drop_table_sql_path(self) -> str:
-        """Return path to SQL DROP TABLE file for this model"""
-        pass
-
     def validate_data(self, gdf: gpd.GeoDataFrame) -> List[str]:
         """Validate data and return list of warnings/errors"""
         warnings = []

@@ -93,21 +93,9 @@ class UnifiedDataLoader:
                 for model_name, strategy in self.strategies.items():
                     up_migrations, down_migrations = self.discovery.get_model_migrations(model_name)
 
-                    # Also check strategy paths as fallback
-                    strategy_up_path = None
-                    strategy_down_path = None
-                    try:
-                        strategy_up_path = strategy.get_create_table_sql_path()
-                        strategy_down_path = strategy.get_drop_table_sql_path()
-                    except:
-                        pass
-
-                    # Combine discovered files and strategy paths
-                    model_up = up_migrations + ([strategy_up_path] if strategy_up_path and os.path.exists(strategy_up_path) else [])
-                    model_down = down_migrations + ([strategy_down_path] if strategy_down_path and os.path.exists(strategy_down_path) else [])
-
-                    all_up.extend(model_up)
-                    all_down.extend(model_down)
+                    # Combine strategy paths
+                    all_up.extend(up_migrations)
+                    all_down.extend(down_migrations)
 
                 if all_up or all_down:
                     print(f"\n🗄️  Step 3: Migrations available (not executed):")
@@ -151,41 +139,38 @@ class UnifiedDataLoader:
             print("❌ Failed to create migrations table")
             return False
 
-        for model_name, strategy in self.strategies.items():
-            try:
-                print(f"\n🔄 Processing migrations for model: {model_name}")
+        # Handle down migrations globally (across all models) if requested
+        if migrate_down:
+            print(f"\n🗄️  Running down migrations globally...")
+            if not self._run_down_migrations():
+                return False
 
-                # Get migration files using new strategy method
-                migration_files = strategy.get_migration_files()
-                up_migrations = migration_files['up']
-                down_migrations = migration_files['down']
+        # Handle up migrations per model if requested
+        if migrate_up:
+            for model_name, strategy in self.strategies.items():
+                try:
+                    print(f"\n🔄 Processing up migrations for model: {model_name}")
 
-                # Run down migrations first (if requested) - in reverse order
-                if migrate_down and down_migrations:
-                    print(f"   ⬇️  Running down migrations...")
-                    for migration_file in reversed(down_migrations):
-                        if not self._execute_migration_file(migration_file, model_name, 'down'):
-                            success = False
-                            break  # Stop on first failure
-                elif migrate_down:
-                    print(f"   ⚠️  No down migrations found for {model_name}")
+                    # Get migration files using new strategy method
+                    migration_files = strategy.get_migration_files()
+                    up_migrations = migration_files['up']
 
-                # Run up migrations (if requested) - in order
-                if migrate_up and up_migrations:
-                    print(f"   ⬆️  Running up migrations...")
-                    for migration_file in up_migrations:
-                        if not self._execute_migration_file(migration_file, model_name, 'up'):
-                            success = False
-                            break  # Stop on first failure
-                elif migrate_up:
-                    print(f"   ⚠️  No up migrations found for {model_name}")
+                    # Run up migrations (if requested) - in order
+                    if up_migrations:
+                        print(f"   ⬆️  Running up migrations...")
+                        for migration_file in up_migrations:
+                            if not self._execute_migration_file(migration_file, model_name, 'up'):
+                                success = False
+                                break  # Stop on first failure
+                    else:
+                        print(f"   ⚠️  No up migrations found for {model_name}")
 
-                if migrate_up or migrate_down:
-                    print(f"   ✅ Migrations completed for {model_name}")
+                    if success:
+                        print(f"   ✅ Migrations completed for {model_name}")
 
-            except Exception as e:
-                print(f"❌ Migration error for {model_name}: {e}")
-                success = False
+                except Exception as e:
+                    print(f"❌ Migration error for {model_name}: {e}")
+                    success = False
 
         return success
 
@@ -226,6 +211,11 @@ class UnifiedDataLoader:
             # Record the migration as applied (for up migrations)
             if direction == 'up':
                 self._record_migration_applied(model_name, migration_name)
+            # Remove the migration record (for down migrations)
+            elif direction == 'down':
+                # Extract the base migration name (remove .rollback.sql extension)
+                base_migration_name = migration_name.replace('.rollback.sql', '.sql')
+                self._record_migration_rolled_back(model_name, base_migration_name)
 
             return True
 
@@ -259,6 +249,102 @@ class UnifiedDataLoader:
                     conn.commit()
         except Exception as e:
             print(f"   ⚠️  Error recording migration: {e}")
+
+    def _get_applied_migrations_for_model(self, model_name: str) -> List[str]:
+        """Get list of applied migrations for a model, sorted by application order"""
+        try:
+            with psycopg2.connect(self.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT migration FROM public.migrations WHERE model = %s ORDER BY id",
+                        (model_name,)
+                    )
+                    return [row[0] for row in cur.fetchall()]
+        except Exception as e:
+            print(f"   ⚠️  Error getting applied migrations: {e}")
+            return []
+
+    def _run_down_migrations(self) -> bool:
+        """Run down migrations globally across all models, newest first"""
+        success = True
+
+        # Get all applied migrations across all models, sorted by created_at descending (newest first)
+        applied_migrations = self._get_all_applied_migrations()
+
+        if not applied_migrations:
+            print("   ⚠️  No applied migrations found to rollback")
+            return True
+
+        print(f"   📋 Found {len(applied_migrations)} applied migration(s) to rollback")
+
+        for model_name, migration_name in applied_migrations:
+            try:
+                print(f"   🔄 Rolling back {migration_name} for model {model_name}")
+
+                # Get the strategy for this model to find rollback files
+                if model_name not in self.strategies:
+                    print(f"   ⚠️  Strategy not found for model {model_name}, skipping...")
+                    continue
+
+                strategy = self.strategies[model_name]
+                migration_files = strategy.get_migration_files()
+                down_migrations = migration_files['down']
+
+                # Find the corresponding rollback file
+                rollback_file = self._find_rollback_file(migration_name, down_migrations)
+                if rollback_file:
+                    if not self._execute_migration_file(rollback_file, model_name, 'down'):
+                        print(f"   ❌ Rollback failed for {migration_name}, stopping...")
+                        success = False
+                        break  # Stop on first failure
+                else:
+                    print(f"   ⚠️  No rollback file found for {migration_name}, skipping...")
+
+            except Exception as e:
+                print(f"   ❌ Error rolling back {migration_name} for {model_name}: {e}")
+                success = False
+                break
+
+        return success
+
+    def _get_all_applied_migrations(self) -> List[tuple]:
+        """Get all applied migrations across all models, sorted by created_at descending (newest first)"""
+        try:
+            with psycopg2.connect(self.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT model, migration FROM public.migrations ORDER BY created_at DESC"
+                    )
+                    return [(row[0], row[1]) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"   ⚠️  Error getting all applied migrations: {e}")
+            return []
+
+    def _find_rollback_file(self, migration_name: str, down_migrations: List[str]) -> Optional[str]:
+        """Find the rollback file for a given migration name"""
+        # Extract base name without extension
+        base_name = migration_name.replace('.sql', '')
+
+        # Look for corresponding rollback file
+        for rollback_file in down_migrations:
+            rollback_basename = os.path.basename(rollback_file).replace('.sql', '')
+            if rollback_basename == f"{base_name}.rollback":
+                return rollback_file
+
+        return None
+
+    def _record_migration_rolled_back(self, model_name: str, migration_name: str) -> None:
+        """Remove migration record when rolled back"""
+        try:
+            with psycopg2.connect(self.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM public.migrations WHERE model = %s AND migration = %s",
+                        (model_name, migration_name)
+                    )
+                    conn.commit()
+        except Exception as e:
+            print(f"   ⚠️  Error removing migration record: {e}")
 
     def _execute_sql_file(self, sql_file_path: str) -> bool:
         """Execute a SQL file against the database"""

@@ -134,14 +134,6 @@ class SchoolsStrategy(BaseLoaderStrategy):
             'geom': 'geom',  # Geometry column (required)
         }
 
-    def get_create_table_sql_path(self) -> str:
-        """Return path to SQL CREATE TABLE file for Schools model"""
-        return "models/schools/migrate/001_create_schools_table.sql"
-
-    def get_drop_table_sql_path(self) -> str:
-        """Return path to SQL DROP TABLE file for Schools model"""
-        return "models/schools/migrate/001_create_schools_table_rollback.sql"
-
     def get_insert_sql(self) -> str:
         """Return SQL insert statement for this model"""
         return """

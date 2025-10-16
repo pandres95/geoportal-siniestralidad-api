@@ -48,19 +48,15 @@ class ModelDiscovery:
             'strategies': [],
             'migrations': [],
             'tests': [],
-            'has_ingest': False,
             'has_migrate': False,
             'has_explore': False,
         }
 
         # Check for ingest components
-        ingest_path = model_path / 'ingest'
-        if ingest_path.exists():
-            model_info['has_ingest'] = True
-
-            # Look for strategy files (both singular and plural)
-            for file_path in ingest_path.glob('*strateg*.py'):
-                model_info['strategies'].append(str(file_path))
+        # Look for the `strategy.py`` file
+        ingest_path = model_path
+        for file_path in ingest_path.glob('strategy.py'):
+            model_info['strategies'].append(str(file_path))
 
         # Check for migration components
         migrate_path = model_path / 'migrate'

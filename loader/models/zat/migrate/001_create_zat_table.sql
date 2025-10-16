@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_zat_zat ON public.zat (zat);
 CREATE INDEX IF NOT EXISTS idx_zat_mun_cod ON public.zat (mun_cod);
 CREATE INDEX IF NOT EXISTS idx_zat_nom_mun ON public.zat (nom_mun);
 
--- Create updated_at trigger
+-- Create updated_at trigger function if it doesn't exist
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -45,10 +45,20 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER update_zat_updated_at
-  BEFORE UPDATE ON public.zat
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
+-- Create trigger only if it doesn't exist
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'update_zat_updated_at'
+    AND tgrelid = 'public.zat'::regclass
+  ) THEN
+    CREATE TRIGGER update_zat_updated_at
+      BEFORE UPDATE ON public.zat
+      FOR EACH ROW
+      EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
 
 -- Add comments for documentation
 COMMENT ON TABLE public.zat IS 'Zonas de Atención Territorial - Territorial zones in Bogota with demographic and accident statistics';
